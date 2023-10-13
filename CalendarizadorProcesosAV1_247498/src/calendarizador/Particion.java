@@ -5,12 +5,11 @@ import interfaces.ControlProceso;
 /**
  * @author Saul Neri
  */
-public class Particion implements ControlProceso {
+public abstract class Particion implements ControlProceso {
     
     protected int numId;
     protected int tiempo;
     protected int tamanho;
-    protected int estado;
     protected Proceso proceso;
     
     public Particion() {
@@ -37,15 +36,7 @@ public class Particion implements ControlProceso {
      * Le asigna un proceso a la particion
      * @param proceso 
      */
-    public void setProceso(Proceso proceso) {
-        if (null == proceso) {
-            throw new Error("# [Proceso.setProceso(...)] El proceso dado es null");
-        }
-        
-        this.proceso = proceso;
-        this.estado = proceso.getEstado();
-        this.tiempo = proceso.getTiempo();
-    }
+    public abstract void setProceso(Proceso proceso);
     
     /**
      * Devuelve el ID de la particion

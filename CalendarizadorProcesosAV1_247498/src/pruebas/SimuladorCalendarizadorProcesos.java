@@ -1,8 +1,4 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
+
 package pruebas;
 
 import calendarizador.Estado;
@@ -19,6 +15,10 @@ public class SimuladorCalendarizadorProcesos {
     public static final int MAX_PROCESOS    = 25;
     public static final int MAX_PARTICIONES = 10; // (bloques de memoria)
     
+    private int apuntadorTabla = 0; 
+    private int memoriaTotal = 0;
+    private int fragInternaTotal = 0;
+    
     public Proceso[] tablaTrabajos;
     public ParticionFija[] tablaMemoria;
     
@@ -26,7 +26,7 @@ public class SimuladorCalendarizadorProcesos {
         this.tablaTrabajos  = new Proceso[25];
         this.tablaMemoria   = new ParticionFija[10];
         
-        this.reiniciarSimulacion();
+        this.reiniciarSimulacion();        
     }
     
     /**
@@ -72,17 +72,150 @@ public class SimuladorCalendarizadorProcesos {
         this.tablaMemoria[7] = new ParticionFija(8,     0,  5500);
         this.tablaMemoria[8] = new ParticionFija(9,     0,  1500);
         this.tablaMemoria[9] = new ParticionFija(10,    0,  500);
+        
+        this.calculaMemoriaTotal();
+    }
+    
+    /**
+     * Ejecuta una vez el flujo del simulador. 
+     * El simulador consiste en que el usuario vaya presionando la tecla ENTER
+     * para ejecutar un paso a la vez del simulador, cada vez que el usuario 
+     * presiona ENTER el calendarizador de procesos va avanzando para ver 
+     * que proceso mete a la memoria, despues de asignarle un bloque de memoria
+     * a un proceso el simulador avanza al siguiente bloque y verifica si esta 
+     * vacio para asignarle un bloque de memoria, sigue verificando los procesos
+     * hasta que ninguno tenga estado de espera o inactivo.
+     */
+    private void ejecutarPaso() {
+        
+        int ptr = apuntadorTabla;
+        
+        // cuando el proceso en la busqueda encuentra entrar en un bloque, se vuelve true
+        boolean busquedaTerminada = false;
+        
+        //System.out.println("per dentro: "+ptr);
+        if (tablaMemoria[ptr].getProceso() != null) {
+            // obtiene el id del proceso que se sacara del bloque de memoria
+            int procTerminadoId = this.tablaMemoria[ptr].getProceso().getId() - 1;
+            
+            // se quita el proceso del bloque
+            this.tablaMemoria[ptr].setProceso(null);
+            
+            // se cambia el estado del proceso a terminado...
+            this.tablaTrabajos[procTerminadoId].setEstado(Estado.TERMINADO);
+            
+            // busca un nuevo proceso para alojarlo dentro del bloque actual...
+            asignarBloqueParticion();
+        } else {
+            asignarBloqueParticion();
+        }
+
+        this.calculaFragInternaTotal();
+        
+        // apunta a la siguiente particion de memoria (siguiente bloque de memoria)
+        if (++apuntadorTabla == MAX_PARTICIONES) {
+            apuntadorTabla = 0;
+        }
+    }
+    
+    /**
+     * Asigna la memoria fragmentada total del simulador
+     */
+    private void calculaFragInternaTotal() {
+        int suma = 0;
+        
+        for (ParticionFija p: tablaMemoria) {
+            suma += p.getFragmentacionInterna();
+        }
+        
+        this.fragInternaTotal = suma;
+    }
+    
+    /**
+     * Asigna la memoria total del simulador (de la tabla de memoria)
+     */
+    private void calculaMemoriaTotal() {
+        int suma = 0;
+        
+        for (int i=0; i < MAX_PARTICIONES; i++) {
+            suma += this.tablaMemoria[i].getTamanho();
+        }
+        
+        this.memoriaTotal = suma;
+    }
+    
+    /**
+     * Le asigna un bloque de memoria a un proceso en el cual alojarse.
+     */
+    private void asignarBloqueParticion() {
+        
+        int ptr = apuntadorTabla;
+        boolean terminarBusqueda = false;
+        
+        // se busca un proceso en espera (PRIORITARIO)
+        for (int pid=0; pid < MAX_PROCESOS; pid++) {
+            Proceso p = this.tablaTrabajos[pid];
+            if (p.getEstado() == Estado.ESPERA) {
+                if (p.getTamanho() < this.tablaMemoria[ptr].getTamanho()) {
+                    this.tablaTrabajos[pid].setEstado(Estado.ASIGNADO);
+                    this.tablaMemoria[ptr].setProceso(this.tablaTrabajos[pid]);
+                    terminarBusqueda = true;
+                    break;
+                }
+            }
+        }
+        
+        // se busca un proceso inactivo si no se encontraron en espera...
+        if (terminarBusqueda == false) {
+            for (int pid=0; pid < MAX_PROCESOS; pid++) {
+                Proceso p = this.tablaTrabajos[pid];
+                if (p.getEstado() == Estado.INACTIVO) {
+                    if (p.getTamanho() < this.tablaMemoria[ptr].getTamanho()) {
+                        p.setEstado(Estado.ASIGNADO);
+                        this.tablaMemoria[ptr].setProceso(p);
+                        break;
+                    }
+                    
+                    this.tablaTrabajos[pid].setEstado(Estado.ESPERA);
+                }
+            }
+        }
+        
+        // fin busqueda de proceso...
+    }
+    
+    /**
+     * Devuele los procesos completados por el simulador
+     * @return 
+     */
+    private int procesosCompletados() {
+        int procCompletados = 0;
+        
+        for (Proceso p: tablaTrabajos) {
+            if (p.getEstado() == Estado.TERMINADO) procCompletados++;
+        }
+        
+        return procCompletados;
     }
     
     /**
      * Ejecuta la simulacion del calendarizador de procesos...
      */
-    public void ejecutarSimulacion() {
+    public void empezarSimulacion() {
         boolean simulacionCorriendo = true;
         
-        this.mostrarTablas();
+        int procRestantes = MAX_PROCESOS;
         
-        //Scanner in = new Scanner(System.in);
+        Scanner in = new Scanner(System.in);
+        
+        while ((procRestantes = MAX_PROCESOS - this.procesosCompletados()) != 0) {
+            mostrarTablas();
+            System.out.print("> ");
+            this.ejecutarPaso();
+            String s = in.nextLine();   
+        }
+         
+        this.mostrarTablas(); // ultimo...
     }
     
     /**
@@ -90,8 +223,9 @@ public class SimuladorCalendarizadorProcesos {
      */
     public void mostrarTablas() {
         String filaProceso, filaParticion, filaTabla;
+       
         
-        String separador = "\t\t";
+        String separador = "\t";
         
         String headerTabla = String.format(
                 "|%10s |%10s |%10s |%10s  |%s|%10s |%10s |%10s  |%10s  | %10s |",
@@ -100,7 +234,7 @@ public class SimuladorCalendarizadorProcesos {
         
              
         String tituloTablaTrabajo   = "                 Tabla de trabajo                 ";
-        String tituloTablaMemoria   = "                       Tabla de memoria                      ";
+        String tituloTablaMemoria   = String.format("Tabla de memoria [Frag. Interna: %8d] [Total Mem: %10d]", this.fragInternaTotal, this.memoriaTotal);
         String marcoTablaTrabajo    = "+------------------------------------------------+";
         String marcoTablaMemoria    = "+--------------------------------------------------------------+";
         
@@ -153,8 +287,22 @@ public class SimuladorCalendarizadorProcesos {
         }
     }
     
+    /*
+    public void limpiarPantalla() {
+        try {
+            if (System.getProperty("os.name").contains("Windows 10")) {
+                new ProcessBuilder("cmd", "/c", "cls").inheritIO().start().waitFor();
+            } else {
+                System.out.print("\033[H\033[2J");
+                System.out.flush();
+            }
+        } catch (Exception e) {
+            // no hagas nada...
+        }
+    }*/
+    
     public static void main(String args[]) {
         SimuladorCalendarizadorProcesos simulador = new SimuladorCalendarizadorProcesos();
-        simulador.ejecutarSimulacion();
+        simulador.empezarSimulacion();
     }
 }
