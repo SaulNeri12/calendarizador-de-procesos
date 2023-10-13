@@ -53,4 +53,18 @@ public class ParticionFija extends Particion {
                 this.getProceso()
         );
     }
+    
+    @Override
+    public void setProceso(Proceso proceso) {
+        if (null == proceso) {
+            this.proceso = null;
+            this.tiempo = 0;
+            this.fragInterna = 0;
+            return;
+        }
+        
+        this.proceso = proceso;
+        this.tiempo = proceso.getTiempo();
+        this.fragInterna = this.getTamanho() - proceso.getTamanho();
+    }
 }
