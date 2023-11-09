@@ -3,6 +3,7 @@ package pruebas;
 
 import calendarizador.Estado;
 import calendarizador.ParticionFija;
+import calendarizador.Procesador;
 import calendarizador.Proceso;
 import java.util.Scanner;
 
@@ -14,6 +15,15 @@ public class SimuladorCalendarizadorProcesos {
        
     public static final int MAX_PROCESOS    = 25;
     public static final int MAX_PARTICIONES = 10; // (bloques de memoria)
+    public static final int QUANTUM         = 5;
+    
+    public static final int CABECERA_ARRIBA_TABLA_CPU       = 1;
+    public static final int CABECERA_CENTRO_TABLA_CPU       = 2;
+    public static final int CABECERA_ABAJO_TABLA_CPU        = 3;
+    public static final int ATENDIENDO_TABLA_CPU            = 4;
+    public static final int SIGUIENTE_TABLA_CPU             = 5;
+    public static final int GUARDANDO_CONTEXTO_TABLA_CPU    = 6;
+    public static final int CARGANDO_CONTEXTO_TABLA_CPU     = 7;
     
     private int apuntadorTabla = 0; 
     private int memoriaTotal = 0;
@@ -21,10 +31,12 @@ public class SimuladorCalendarizadorProcesos {
     
     public Proceso[] tablaTrabajos;
     public ParticionFija[] tablaMemoria;
+    public Procesador procesador;
     
     public SimuladorCalendarizadorProcesos() {
         this.tablaTrabajos  = new Proceso[25];
         this.tablaMemoria   = new ParticionFija[10];
+        this.procesador = new Procesador();
         
         this.reiniciarSimulacion();        
     }
@@ -73,6 +85,11 @@ public class SimuladorCalendarizadorProcesos {
         this.tablaMemoria[8] = new ParticionFija(9,     0,  1500);
         this.tablaMemoria[9] = new ParticionFija(10,    0,  500);
         
+        // se les anade 20 de tiempo a cada proceso
+        for (int i=0; i < this.tablaTrabajos.length; i++) {
+            this.tablaTrabajos[i].setTiempo(tablaTrabajos[i].getTiempo() + 20);
+        }        
+        
         this.calculaMemoriaTotal();
     }
     
@@ -90,22 +107,58 @@ public class SimuladorCalendarizadorProcesos {
         
         int ptr = apuntadorTabla;
         
-        // cuando el proceso en la busqueda encuentra entrar en un bloque, se vuelve true
-        boolean busquedaTerminada = false;
+        Scanner in = new Scanner(System.in);
+        String s;
         
-        //System.out.println("per dentro: "+ptr);
+        
         if (tablaMemoria[ptr].getProceso() != null) {
-            // obtiene el id del proceso que se sacara del bloque de memoria
-            int procTerminadoId = this.tablaMemoria[ptr].getProceso().getId() - 1;
+            // obtiene el id del proceso que se le dara el Quantum
+            int procId = this.tablaMemoria[ptr].getProceso().getId() - 1;
             
-            // se quita el proceso del bloque
-            this.tablaMemoria[ptr].setProceso(null);
+            procesador.cargaContexto(procId + 1);
+            procesador.guardarContexto(0);
             
-            // se cambia el estado del proceso a terminado...
-            this.tablaTrabajos[procTerminadoId].setEstado(Estado.TERMINADO);
+            this.mostrarTablas();
             
-            // busca un nuevo proceso para alojarlo dentro del bloque actual...
-            asignarBloqueParticion();
+            s = in.nextLine();
+            
+            procesador.cargaContexto(0); // restablece el campo
+            procesador.atiendeProceso(procId + 1);
+            procesador.setProcesoSiguiente(this.obtenerSiguienteProceso());
+            
+            for (int i=0; i < QUANTUM; i++) {
+                
+                // cursor...
+                System.out.printf(">>> ");
+                s = in.nextLine(); 
+                
+                int tiempo = this.tablaTrabajos[procId].getTiempo();
+                
+                // se le resta una unidad de tiempo del Quantum...
+                this.tablaTrabajos[procId].setTiempo(tiempo - 1);
+                
+                boolean tiempoAcabo = (tiempo - 1) <= 0; 
+                
+                if (tiempoAcabo) {
+                    this.mostrarTablas();
+                    // se quita el proceso del bloque
+                    this.tablaMemoria[ptr].setProceso(null);
+                    // se cambia el estado del proceso a terminado...
+                    this.tablaTrabajos[procId].setEstado(Estado.TERMINADO);
+                    break;
+                }
+                
+                
+                this.mostrarTablas();
+            }
+            
+            procesador.guardarContexto(procId+1);
+            //this.mostrarTablas();
+            procesador.cargaContexto(0); // se restablece el campo
+            this.mostrarTablas();
+            procesador.atiendeProceso(0); // se restablece el campo
+            
+            // busca un nuevo proceso para asignarle su Quantum...
         } else {
             asignarBloqueParticion();
         }
@@ -214,7 +267,13 @@ public class SimuladorCalendarizadorProcesos {
             this.ejecutarPaso();
             String s = in.nextLine();   
         }
-         
+        
+        // se limpian los campos...
+        procesador.atiendeProceso(0);
+        procesador.setProcesoSiguiente(0);
+        procesador.cargaContexto(0);
+        procesador.guardarContexto(0);
+        
         this.mostrarTablas(); // ultimo...
     }
     
@@ -237,6 +296,9 @@ public class SimuladorCalendarizadorProcesos {
         String tituloTablaMemoria   = String.format("Tabla de memoria [Frag. Interna: %8d] [Total Mem: %10d]", this.fragInternaTotal, this.memoriaTotal);
         String marcoTablaTrabajo    = "+------------------------------------------------+";
         String marcoTablaMemoria    = "+--------------------------------------------------------------+";
+        String marcoTablaProcesador = "+--------------------------------------------+";
+        
+        int contadorFilaCPU         = 0;
         
         // se imprime la cabecera de las tablas
         System.out.println(tituloTablaTrabajo + separador + tituloTablaMemoria);
@@ -252,7 +314,7 @@ public class SimuladorCalendarizadorProcesos {
                     this.tablaTrabajos[i].getTiempo(),
                     this.tablaTrabajos[i].getTamanho(),
                     Estado.getEstadoTexto(this.tablaTrabajos[i].getEstado()) 
-            );
+            );  
             
             if (i < MAX_PARTICIONES) { 
                 
@@ -279,27 +341,93 @@ public class SimuladorCalendarizadorProcesos {
                 
                 filaTabla = filaProceso + separador + filaParticion;
             } else {
+                
                 filaTabla = filaProceso; // se omiten las filas de tabla de memoria INEXISTENTES
+                
+                String filaCPU = "";
+                
+                
+                int pid = 0;
+                String texto = "";
+                
+                if (i > MAX_PARTICIONES && i <= MAX_PARTICIONES + 7) {
+                    int punteroFilaTabla = i - (MAX_PARTICIONES);
+                    
+                    switch (punteroFilaTabla) {
+                        case CABECERA_ARRIBA_TABLA_CPU:
+                            filaCPU = marcoTablaProcesador;
+                            break;
+                        case CABECERA_CENTRO_TABLA_CPU:
+                            filaCPU = "|                 PROCESADOR                 |";
+                            break;
+                        case CABECERA_ABAJO_TABLA_CPU:
+                            filaCPU = marcoTablaProcesador;
+                            break;
+                        case ATENDIENDO_TABLA_CPU:
+                            pid = procesador.procesoAtendiendose();
+                            texto = (pid > 0) ? String.valueOf(pid) : "";
+                            filaCPU = String.format("|      Atendiendo      |%20s |", texto);
+                            break;
+                        case SIGUIENTE_TABLA_CPU:
+                            pid = procesador.procesoSiguiente();
+                            texto = (pid > 0) ? String.valueOf(pid) : "";
+                            filaCPU = String.format("|      Siguiente       |%20s |", texto);
+                            break;
+                        case GUARDANDO_CONTEXTO_TABLA_CPU:
+                            pid = procesador.contextoGuardando();
+                            texto = (pid > 0) ? String.valueOf(pid) : "";
+                            filaCPU = String.format("|  Guardando Contexto  |%20s |", texto);
+                            break;
+                        case CARGANDO_CONTEXTO_TABLA_CPU:
+                            pid = procesador.contextoCargando();
+                            texto = (pid > 0) ? String.valueOf(pid) : "";
+                            filaCPU = String.format("|  Cargando Contexto   |%20s |", texto);
+                            break;
+                    }
+                    
+                    filaTabla = filaProceso + separador + filaCPU;
+                    
+                    // resetea el contador puntero para dibujarla tabla del procesador
+                    if (++punteroFilaTabla >= 7) {
+                        punteroFilaTabla = 0;
+                    }
+                }
             }
-            
-                            
+                      
             System.out.println(filaTabla);
         }
     }
-    
-    /*
-    public void limpiarPantalla() {
-        try {
-            if (System.getProperty("os.name").contains("Windows 10")) {
-                new ProcessBuilder("cmd", "/c", "cls").inheritIO().start().waitFor();
-            } else {
-                System.out.print("\033[H\033[2J");
-                System.out.flush();
+
+    /**
+     * Obtiene el PID del siguiente proceso que sigue del actual apuntado por el apuntador
+     * de tabla de memoria
+     * @return Devuelve el PId del siguiente proceso
+     */
+    public int obtenerSiguienteProceso() {
+        int ptr = apuntadorTabla;
+        
+        int siguiente = 0;
+        
+        int i=ptr;
+        int busquedas = 0;
+        
+        while (true) {
+            if (++i >= this.tablaMemoria.length) {
+                i = 0;
             }
-        } catch (Exception e) {
-            // no hagas nada...
+
+            if (this.tablaMemoria[i].getProceso() != null) {
+                siguiente = this.tablaMemoria[i].getProceso().getId();
+                return siguiente;
+            }
+
+            // detecta si ya se dio una vuelta completa a la tabla y no se encontro 
+            // ningun proceso siguiente
+            if (++busquedas >= this.tablaMemoria.length) {
+                return 0;
+            }
         }
-    }*/
+    }
     
     public static void main(String args[]) {
         SimuladorCalendarizadorProcesos simulador = new SimuladorCalendarizadorProcesos();
